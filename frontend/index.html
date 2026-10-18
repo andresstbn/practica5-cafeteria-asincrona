@@ -456,9 +456,11 @@
     refrescar();
   }
 
+  // Cada refresco de la pantalla son unas 27 lecturas de Firestore, y las
+  // lecturas tienen cuota diaria. Una pestaña oculta no necesita refrescarse.
   let ocupado = false;
   async function refrescar() {
-    if (ocupado) return;
+    if (document.hidden || ocupado) return;
     ocupado = true;
     try {
       if (vistaActual() === "pantalla") {
@@ -495,8 +497,9 @@
   $("#otro").addEventListener("click", () => seguir(null));
   $("#reponer").addEventListener("click", reponer);
   window.addEventListener("hashchange", mostrarVista);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refrescar(); });
   mostrarVista();
-  setInterval(refrescar, 3000);
+  setInterval(refrescar, 5000);
 </script>
 </body>
 </html>

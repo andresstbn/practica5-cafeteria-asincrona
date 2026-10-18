@@ -22,14 +22,15 @@ flowchart LR
         frontend["frontend<br/>Cloud Run, público"]
         backend["backend<br/>Cloud Run, público"]
         firestore[("Firestore<br/>pedidos e inventario")]
-        registro["Artifact Registry"]
+        registro["Artifact Registry<br/>imágenes de los servicios"]
     end
 
     subgraph grupo["Lo construye tu grupo"]
         tema{{"Tema de Pub/Sub"}}
         suscripcion["Suscripción push<br/>con token OIDC"]
         cocina["cocina<br/>Cloud Run, privado"]
-        invocador["Cuenta invocadora<br/>roles/run.invoker"]
+        invocador["Cuenta invocadora"]
+        agente["Agente de servicio<br/>de Pub/Sub<br/>service-NÚMERO@<br/>gcp-sa-pubsub.iam.<br/>gserviceaccount.com"]
     end
 
     telefono -->|"carga la página"| frontend
@@ -38,12 +39,15 @@ flowchart LR
     backend -->|"publica el id"| tema
     tema --> suscripcion
     suscripcion -->|"POST / con token"| cocina
-    invocador -.->|"identidad del token"| suscripcion
+    suscripcion -->|"token a nombre de"| invocador
     cocina -->|"cambia el estado y descuenta"| firestore
-    registro -.->|"imágenes"| frontend
-    registro -.-> backend
-    registro -.-> cocina
+
+    backend -.->|"pubsub.publisher"| tema
+    agente -.->|"iam.serviceAccountTokenCreator"| invocador
+    invocador -.->|"run.invoker"| cocina
 ```
+
+Las flechas punteadas son los permisos de IAM que da tu grupo. La etiqueta es el rol sin el prefijo `roles/` y la flecha llega al recurso sobre el que se da: el backend puede publicar solo en ese tema, el agente de Pub/Sub puede firmar tokens como la cuenta invocadora y esa cuenta puede invocar solo a la cocina.
 
 En la plantilla, el backend ya sabe publicar, pero la variable `TEMA` está vacía: guarda el pedido, registra una advertencia y no avisa a nadie. Por eso, recién desplegada, la cafetería recibe pedidos que se quedan en `recibido` para siempre.
 
@@ -176,6 +180,8 @@ docker logs cocina
 Responde `204` cuando termina, unos segundos después. Mira el pedido en la pantalla de la cafetería: acabas de hacer a mano lo que Pub/Sub va a hacer solo.
 
 La cocina tiene dos variables para provocar fallas: `TIEMPO_PREPARACION` (segundos que tarda, 6 por defecto) y `PROBABILIDAD_FALLO` (entre 0 y 1; con esa probabilidad responde `500` después de haber terminado el trabajo). Los detalles están en [docs/api.md](docs/api.md) y el recorrido de un pedido en [docs/estados.md](docs/estados.md).
+
+El plato misterioso falla siempre, y sin un tema de mensajes muertos Pub/Sub lo sigue reintentando mientras retenga el mensaje, que por defecto son 7 días. Cada intento deja un error en los logs de la cocina, así que se van a llenar hasta que tu grupo resuelva esa parte del reto.
 
 ---
 

@@ -122,15 +122,15 @@ def validar(cuerpo):
     return cliente, limpios
 
 
-# El número y el pedido se escriben en la misma transacción: si dos pedidos
-# llegan a la vez, Firestore reintenta uno de ellos y nunca repite un número.
-@firestore.transactional
-def guardar(transaccion, contador, pedido_ref, datos):
-    actual = contador.get(transaction=transaccion)
-    numero = (actual.get("valor") if actual.exists else 0) + 1
-    transaccion.set(contador, {"valor": numero})
-    transaccion.set(pedido_ref, {**datos, "numero": numero})
-    return numero
+# El número sale de un incremento atómico que resuelve el servidor, sin
+# bloquear el contador. Con una transacción, muchos pedidos a la vez peleaban
+# por el mismo documento y la mayoría fallaba. Si algo falla entre el
+# incremento y el guardado, se salta un número, que no le hace daño a nadie.
+def siguiente_numero():
+    resultado = db().collection("contadores").document("pedidos").set(
+        {"valor": firestore.Increment(1)}, merge=True
+    )
+    return resultado.transform_results[0].integer_value
 
 
 def publicar(pedido_id):
@@ -178,9 +178,9 @@ def crear_pedido():
         "creado": momento,
         "actualizado": momento,
     }
+    numero = siguiente_numero()
     pedido_ref = db().collection("pedidos").document()
-    contador = db().collection("contadores").document("pedidos")
-    numero = guardar(db().transaction(), contador, pedido_ref, datos)
+    pedido_ref.set({**datos, "numero": numero})
 
     publicar(pedido_ref.id)
     return jsonify(como_json(pedido_ref.id, {**datos, "numero": numero})), 201
